@@ -71,7 +71,7 @@ enum KC {
         switch code {
         case ret:        return "↩"
         case tab:        return "⇥"
-        case space:      return "␣"
+        case space:      return ""
         case delete:     return "⌫"
         case esc:        return "⎋"
         case kpEnter:    return "⌤"

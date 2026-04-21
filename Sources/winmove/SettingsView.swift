@@ -243,7 +243,11 @@ private struct KeybindsSection: View {
     /// Identifies which thing is being edited in the modal sheet:
     /// either a whole keybind, or a single frame step inside a cycle.
     private struct EditingTarget: Identifiable {
-        enum Kind { case bind; case cycleStep(stepIndex: Int) }
+        enum Kind {
+            case bind
+            case cycleStep(stepIndex: Int)
+            var isBind: Bool { if case .bind = self { return true } else { return false } }
+        }
         let id = UUID()
         let bindID: Keybind.ID
         var draft: Keybind          // working copy presented to the editor
@@ -264,7 +268,7 @@ private struct KeybindsSection: View {
                     onToggleExpand: { toggleExpand(bind.id) },
                     onPromoteToCycle: { promoteToCycle(bindID: bind.id) },
                     onUpdateKeys: { newKeys in updateKeys(id: bind.id, keys: newKeys) },
-                    onEdit: { editing = EditingTarget(bindID: bind.id, draft: bind, kind: .bind) },
+                    onEdit: { startEditingMainRow(bind: bind) },
                     onDelete: { deleteBind(id: bind.id) }
                 )
                 if isCycle(bind), expanded.contains(bind.id) {
@@ -291,7 +295,7 @@ private struct KeybindsSection: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.18)))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .sheet(item: $editing) { target in
-            KeybindEditor(binding: target.draft) { updated in
+            KeybindEditor(binding: target.draft, showsNameField: target.kind.isBind) { updated in
                 applyEditorResult(target: target, updated: updated)
                 editing = nil
             } onCancel: { editing = nil }
@@ -418,9 +422,28 @@ private struct KeybindsSection: View {
         case .center:        firstSpec = FrameSpec(x: 0.2, y: 0.2, w: 0.6, h: 0.6)
         case .cycle:         return    // already a cycle
         }
-        let seed = FrameSpec(x: 0.1, y: 0.1, w: 0.8, h: 0.8)
+        let seed = firstSpec
         settings.keybinds[i].action.kind = .cycle([firstSpec, seed])
         expanded.insert(bindID)
+    }
+
+    /// When the user clicks the main row's edit affordance:
+    /// - For non-cycle binds, edit the bind directly (existing behavior).
+    /// - For cycles, edit step 1 only — splice the result back into specs[0]
+    ///   instead of replacing the entire cycle with a single .frame.
+    private func startEditingMainRow(bind: Keybind) {
+        if case .cycle(let specs) = bind.action.kind, let first = specs.first {
+            let stepBind = Keybind(
+                id: bind.id,
+                keys: bind.keys,
+                action: WindowAction(id: bind.action.id,
+                                     name: "\(bind.action.name) · Step 1",
+                                     kind: .frame(first))
+            )
+            editing = EditingTarget(bindID: bind.id, draft: stepBind, kind: .cycleStep(stepIndex: 0))
+        } else {
+            editing = EditingTarget(bindID: bind.id, draft: bind, kind: .bind)
+        }
     }
 }
 
@@ -434,27 +457,31 @@ private struct CycleStepsList: View {
     var body: some View {
         if case .cycle(let specs) = bind.action.kind {
             VStack(spacing: 0) {
+                // Step 1 is represented by the parent row itself; skip it here
+                // so the user sees one step row per *additional* step.
                 ForEach(Array(specs.enumerated()), id: \.offset) { idx, spec in
-                    CycleStepRow(
-                        index: idx,
-                        spec: spec,
-                        parentName: bind.action.name,
-                        onEdit: {
-                            // Hand the editor a synthetic single-frame keybind so it can reuse
-                            // the existing FrameRectEditor flow; we'll splice the result back
-                            // into the cycle in applyEditorResult.
-                            let stepBind = Keybind(
-                                id: bind.id,
-                                keys: bind.keys,
-                                action: WindowAction(id: bind.action.id,
-                                                     name: "\(bind.action.name) · Step \(idx + 1)",
-                                                     kind: .frame(spec))
-                            )
-                            onEditStep(idx, stepBind)
-                        },
-                        onDelete: { onDeleteStep(idx) }
-                    )
-                    Divider().opacity(0.2)
+                    if idx > 0 {
+                        CycleStepRow(
+                            index: idx,
+                            spec: spec,
+                            parentName: bind.action.name,
+                            onEdit: {
+                                // Hand the editor a synthetic single-frame keybind so it can reuse
+                                // the existing FrameRectEditor flow; we'll splice the result back
+                                // into the cycle in applyEditorResult.
+                                let stepBind = Keybind(
+                                    id: bind.id,
+                                    keys: bind.keys,
+                                    action: WindowAction(id: bind.action.id,
+                                                         name: "\(bind.action.name) · Step \(idx + 1)",
+                                                         kind: .frame(spec))
+                                )
+                                onEditStep(idx, stepBind)
+                            },
+                            onDelete: { onDeleteStep(idx) }
+                        )
+                        Divider().opacity(0.2)
+                    }
                 }
                 AddCycleStepRow(action: onAddStep)
             }
@@ -787,6 +814,7 @@ struct KeyCap: View {
 
 private struct KeybindEditor: View {
     @State var binding: Keybind
+    var showsNameField: Bool = true
     let onSave: (Keybind) -> Void
     let onCancel: () -> Void
 
@@ -799,7 +827,9 @@ private struct KeybindEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Edit Binding").font(.headline)
-            TextField("Name", text: $binding.action.name)
+            if showsNameField {
+                TextField("Name", text: $binding.action.name)
+            }
 
             GroupBox("Frame") {
                 VStack(spacing: 10) {
@@ -821,7 +851,7 @@ private struct KeybindEditor: View {
             HStack {
                 Spacer()
                 Button("Cancel") { onCancel() }
-                Button("Save") { save() }.keyboardShortcut(.defaultAction)
+                Button("Save") { commitPendingEditsAndSave() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding()
@@ -851,6 +881,17 @@ private struct KeybindEditor: View {
         var b = binding
         b.action.kind = .frame(FrameSpec(x: x, y: y, w: w, h: h))
         onSave(b)
+    }
+
+    /// Force any focused PercentField to commit its in-progress text before
+    /// saving. AppKit only fires the focus-loss commit when first responder
+    /// changes, so clicking Save while a field is still focused would otherwise
+    /// save the stale bound value.
+    private func commitPendingEditsAndSave() {
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            window.makeFirstResponder(nil)
+        }
+        DispatchQueue.main.async { save() }
     }
 }
 
