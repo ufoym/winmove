@@ -95,6 +95,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             win.contentMinSize = NSSize(width: 560, height: 240)
             settingsWindow = win
 
+            // Release the window from memory when the user closes it.
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: win, queue: .main
+            ) { [weak self] _ in
+                self?.settingsWindow = nil
+            }
+
             // Size the window to fit the SwiftUI content, capped at 80% of the
             // current screen height. Layout once so the hosting view reports a
             // real fitting size.

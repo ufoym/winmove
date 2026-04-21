@@ -10,7 +10,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "winmove",
-            path: "Sources/winmove"
+            path: "Sources/winmove",
+            swiftSettings: [.unsafeFlags(["-Osize"], .when(configuration: .release))]
         )
     ]
 )

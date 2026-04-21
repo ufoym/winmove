@@ -6,7 +6,6 @@
 
 import AppKit
 import SwiftUI
-import Combine
 
 @MainActor
 final class PreviewViewModel: ObservableObject {
@@ -124,6 +123,9 @@ final class PreviewOverlay {
             // Only tear down if we're still in the hidden state (not re-shown in the meantime).
             if self.viewModel.isShown == false {
                 panel.orderOut(nil)
+                self.panel = nil
+                self.hostingView = nil
+                self.currentScreen = nil
             }
         }
         hideWorkItem = work
