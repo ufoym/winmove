@@ -13,14 +13,19 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 OUT="$ROOT/build"
 APP="$OUT/winmove.app"
 
-echo "→ swift build -c $CONFIG"
-swift build -c "$CONFIG"
+echo "→ swift build -c $CONFIG (arm64)"
+swift build -c "$CONFIG" --arch arm64
+ARM64_BIN="$(swift build -c "$CONFIG" --arch arm64 --show-bin-path)/winmove"
 
-BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)"
+echo "→ swift build -c $CONFIG (x86_64)"
+swift build -c "$CONFIG" --arch x86_64
+X86_64_BIN="$(swift build -c "$CONFIG" --arch x86_64 --show-bin-path)/winmove"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN_PATH/winmove" "$APP/Contents/MacOS/winmove"
+
+echo "→ lipo -create (universal)"
+lipo -create "$ARM64_BIN" "$X86_64_BIN" -output "$APP/Contents/MacOS/winmove"
 # Strip local symbols to reduce binary size.
 strip -x "$APP/Contents/MacOS/winmove"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
